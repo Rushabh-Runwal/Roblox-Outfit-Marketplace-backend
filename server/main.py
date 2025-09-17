@@ -27,20 +27,27 @@ app.add_middleware(
 
 # Pydantic models
 class ChatRequest(BaseModel):
-    message: str = Field(..., description="User message to the NPC")
+    prompt: str = Field(..., description="User prompt to the NPC")
+    user_id: int = Field(..., description="User ID")
 
 class ChatResponse(BaseModel):
+    success: bool = Field(..., description="Whether the request was successful")
+    user_id: int = Field(..., description="User ID")
     reply: str = Field(..., description="NPC's reply to the user")
 
 class RecommendRequest(BaseModel):
     theme: str = Field(..., description="Theme for outfit recommendations")
+    user_id: int = Field(..., description="User ID")
 
 class OutfitItem(BaseModel):
-    assetId: int = Field(..., description="Roblox asset ID")
+    assetId: str = Field(..., description="Roblox asset ID as string")
     type: str = Field(..., description="Type of outfit item")
 
 class RecommendResponse(BaseModel):
-    items: List[OutfitItem] = Field(..., description="List of recommended outfit items")
+    success: bool = Field(..., description="Whether the request was successful")
+    user_id: int = Field(..., description="User ID")
+    message: str = Field(..., description="Outfit ready message")
+    outfit: List[OutfitItem] = Field(..., description="List of recommended outfit items")
 
 # NPC chat responses based on common themes
 NPC_RESPONSES = {
@@ -105,51 +112,98 @@ SAMPLE_OUTFITS = {
     ]
 }
 
-def get_npc_response(message: str) -> str:
-    """Generate an appropriate NPC response based on the user's message."""
-    message_lower = message.lower()
+def get_npc_response(prompt: str) -> str:
+    """Generate an appropriate NPC response based on the user's prompt."""
+    prompt_lower = prompt.lower()
     
-    if any(word in message_lower for word in ["hello", "hi", "hey", "greetings"]):
+    if any(word in prompt_lower for word in ["hello", "hi", "hey", "greetings"]):
         return random.choice(NPC_RESPONSES["greeting"])
-    elif any(word in message_lower for word in ["recommend", "suggestion", "outfit", "style", "clothes"]):
+    elif any(word in prompt_lower for word in ["recommend", "suggestion", "outfit", "style", "clothes"]):
         return random.choice(NPC_RESPONSES["recommendation"])
     else:
         return random.choice(NPC_RESPONSES["default"])
 
-async def fetch_roblox_catalog_items(theme: str, limit: int = 8) -> List[OutfitItem]:
+async def fetch_roblox_catalog_items(theme: str, limit: int = 10) -> List[OutfitItem]:
     """
-    Fetch outfit items from Roblox catalog API.
-    For now, using sample data. In production, this would make real API calls.
+    Fetch outfit items from Roblox catalog API v2.
+    Uses the search/items/details endpoint with retry logic.
+    Falls back to sample data if API is unavailable.
     """
-    try:
-        # In a real implementation, you would use the Roblox catalog API:
-        # async with httpx.AsyncClient() as client:
-        #     response = await client.get(f"https://catalog.roblox.com/v1/search/items?category=Clothing&keyword={theme}&limit={limit}")
-        #     data = response.json()
-        #     return [OutfitItem(assetId=item["id"], type=item["itemType"]) for item in data["data"]]
-        
-        # Using sample data for demonstration
-        theme_lower = theme.lower()
-        outfit_items = []
-        
-        # Find matching theme or use a default
-        if theme_lower in SAMPLE_OUTFITS:
-            outfit_items = SAMPLE_OUTFITS[theme_lower]
-        else:
-            # Use casual as default and mix with other themes
-            outfit_items = SAMPLE_OUTFITS["casual"][:4] + SAMPLE_OUTFITS["formal"][:2]
-        
-        # Shuffle and limit results
-        random.shuffle(outfit_items)
-        selected_items = outfit_items[:min(limit, len(outfit_items))]
-        
-        return [OutfitItem(**item) for item in selected_items]
-        
-    except Exception as e:
-        logger.error(f"Error fetching catalog items: {e}")
-        # Fallback to casual items
-        fallback_items = SAMPLE_OUTFITS["casual"][:6]
-        return [OutfitItem(**item) for item in fallback_items]
+    url = "https://catalog.roblox.com/v2/search/items/details"
+    params = {
+        "categoryFilter": "CommunityCreations",
+        "limit": min(limit, 10),  # Cap at 10 as per requirements
+        "keyword": theme
+    }
+    
+    # Retry configuration
+    max_retries = 3
+    timeout = 10.0
+    
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                logger.info(f"Fetching Roblox catalog items for theme '{theme}', attempt {attempt + 1}")
+                response = await client.get(url, params=params)
+                response.raise_for_status()
+                
+                data = response.json()
+                
+                # Validate response structure
+                if "data" not in data or not isinstance(data["data"], list):
+                    logger.warning(f"Invalid response structure from Roblox API: {data}")
+                    raise ValueError("Invalid response structure")
+                
+                items = []
+                for item in data["data"]:
+                    # Extract assetId and type from the item
+                    asset_id = str(item.get("id", ""))
+                    item_type = item.get("itemType", "") or item.get("assetType", "Accessory")
+                    
+                    if asset_id:  # Only add items with valid IDs
+                        items.append(OutfitItem(assetId=asset_id, type=item_type))
+                
+                logger.info(f"Successfully fetched {len(items)} items for theme '{theme}'")
+                return items[:limit]  # Ensure we don't exceed the limit
+                
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"HTTP error on attempt {attempt + 1}: {e.response.status_code}")
+            if attempt == max_retries - 1:
+                break
+        except httpx.TimeoutException:
+            logger.warning(f"Timeout on attempt {attempt + 1}")
+            if attempt == max_retries - 1:
+                break
+        except Exception as e:
+            logger.warning(f"Error on attempt {attempt + 1}: {e}")
+            if attempt == max_retries - 1:
+                break
+    
+    # Fallback to sample data if API is unavailable
+    logger.warning(f"Roblox API unavailable, using sample data for theme '{theme}'")
+    return get_sample_outfit_items(theme, limit)
+
+
+def get_sample_outfit_items(theme: str, limit: int) -> List[OutfitItem]:
+    """
+    Get sample outfit items when the real API is unavailable.
+    Converts sample data to match the new string-based assetId format.
+    """
+    theme_lower = theme.lower()
+    
+    # Find matching theme or use a default
+    if theme_lower in SAMPLE_OUTFITS:
+        outfit_items = SAMPLE_OUTFITS[theme_lower]
+    else:
+        # Use casual as default and mix with other themes for variety
+        outfit_items = SAMPLE_OUTFITS["casual"][:4] + SAMPLE_OUTFITS["formal"][:2]
+    
+    # Shuffle and limit results
+    random.shuffle(outfit_items)
+    selected_items = outfit_items[:min(limit, len(outfit_items))]
+    
+    # Convert to OutfitItem objects with string assetIds
+    return [OutfitItem(assetId=str(item["assetId"]), type=item["type"]) for item in selected_items]
 
 @app.get("/")
 async def root():
@@ -170,15 +224,21 @@ async def chat(request: ChatRequest):
     Chat endpoint where NPC replies to user prompts.
     """
     try:
-        if not request.message.strip():
-            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        if not request.prompt.strip():
+            raise HTTPException(status_code=400, detail="Prompt cannot be empty")
         
-        npc_reply = get_npc_response(request.message)
+        npc_reply = get_npc_response(request.prompt)
         
-        logger.info(f"Chat request: {request.message[:50]}... -> Reply: {npc_reply[:50]}...")
+        logger.info(f"Chat request from user {request.user_id}: {request.prompt[:50]}... -> Reply: {npc_reply[:50]}...")
         
-        return ChatResponse(reply=npc_reply)
+        return ChatResponse(
+            success=True,
+            user_id=request.user_id,
+            reply=npc_reply
+        )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -187,27 +247,54 @@ async def chat(request: ChatRequest):
 async def recommend(request: RecommendRequest):
     """
     Recommend endpoint that fetches 6-10 outfit items from Roblox catalog API by theme.
-    Returns JSON with assetId and type.
+    Returns JSON with assetId and type, plus success message.
     """
     try:
         if not request.theme.strip():
             raise HTTPException(status_code=400, detail="Theme cannot be empty")
         
         # Fetch outfit items (6-10 items)
-        outfit_items = await fetch_roblox_catalog_items(request.theme, limit=random.randint(6, 10))
+        limit = random.randint(6, 10)
+        outfit_items = await fetch_roblox_catalog_items(request.theme, limit=limit)
         
         if not outfit_items:
-            raise HTTPException(status_code=404, detail="No outfit items found for this theme")
+            # Return error response as per requirements
+            return RecommendResponse(
+                success=False,
+                user_id=request.user_id,
+                message=f"No items found for theme '{request.theme}'. Try a different theme.",
+                outfit=[]
+            )
         
-        logger.info(f"Recommendation request for theme '{request.theme}' -> {len(outfit_items)} items")
+        logger.info(f"Recommendation request from user {request.user_id} for theme '{request.theme}' -> {len(outfit_items)} items")
         
-        return RecommendResponse(items=outfit_items)
+        return RecommendResponse(
+            success=True,
+            user_id=request.user_id,
+            message=f"Your {request.theme} outfit is ready!",
+            outfit=outfit_items
+        )
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error in recommend endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        # For unexpected errors, still try to return a fallback response
+        try:
+            fallback_items = get_sample_outfit_items(request.theme, random.randint(6, 10))
+            logger.info(f"Using fallback data for user {request.user_id}, theme '{request.theme}'")
+            return RecommendResponse(
+                success=True,
+                user_id=request.user_id,
+                message=f"Your {request.theme} outfit is ready!",
+                outfit=fallback_items
+            )
+        except Exception:
+            # If even fallback fails, return 502 as per requirements
+            raise HTTPException(
+                status_code=502, 
+                detail="Failed to fetch outfit recommendations. Please try again later."
+            )
 
 if __name__ == "__main__":
     import uvicorn

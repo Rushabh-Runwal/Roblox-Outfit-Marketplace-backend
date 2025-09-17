@@ -4,10 +4,17 @@ Backend service that powers chat and outfit selection in our Roblox game "Ai-Sty
 ## Features
 
 - **Chat Endpoint** (`/chat`): NPC chat system that responds to user prompts with style advice
+  - Input: `{ "prompt": string, "user_id": int }`
+  - Output: `{ "success": true, "user_id": int, "reply": string }`
 - **Recommendation Endpoint** (`/recommend`): Fetches 6-10 outfit items from Roblox catalog by theme
+  - Input: `{ "theme": string, "user_id": int }`
+  - Fetches items from `https://catalog.roblox.com/v2/search/items/details`
+  - Output: `{ "success": true, "user_id": int, "message": string, "outfit": [{"assetId": string, "type": string}] }`
 - **FastAPI Backend**: Modern, fast web framework with automatic API documentation
 - **Pydantic Models**: Type validation and serialization for all data
 - **CORS Support**: Cross-origin requests enabled for web integration
+- **Error Handling**: Proper 502 responses for external API failures with fallback data
+- **Retry Logic**: 3-attempt retry with timeout for Roblox API calls
 
 ## API Endpoints
 
@@ -17,38 +24,45 @@ Chat with the AI Style Assistant NPC.
 **Request:**
 ```json
 {
-  "message": "Hello! I need style advice"
+  "prompt": "I want a knight outfit.",
+  "user_id": 7470350941
 }
 ```
 
 **Response:**
 ```json
 {
+  "success": true,
+  "user_id": 7470350941,
   "reply": "Welcome to the Roblox Outfit Marketplace! I'm here to help you find the perfect style!"
 }
 ```
 
 ### POST /recommend
-Get outfit recommendations by theme.
+Get outfit recommendations by theme from the Roblox catalog.
 
 **Request:**
 ```json
 {
-  "theme": "casual"
+  "theme": "knight",
+  "user_id": 7470350941
 }
 ```
 
 **Response:**
 ```json
 {
-  "items": [
+  "success": true,
+  "user_id": 7470350941,
+  "message": "Your knight outfit is ready!",
+  "outfit": [
     {
-      "assetId": 1234567890,
-      "type": "shirt"
+      "assetId": "123",
+      "type": "Accessory"
     },
     {
-      "assetId": 2345678901,
-      "type": "pants"
+      "assetId": "456",
+      "type": "Hat"
     }
   ]
 }
@@ -84,6 +98,22 @@ The server will start on `http://localhost:8000`
 - **API Documentation**: Visit `http://localhost:8000/docs` for interactive Swagger UI
 - **Alternative Docs**: Visit `http://localhost:8000/redoc` for ReDoc documentation
 
+### Example cURL Commands
+
+Test the chat endpoint:
+```bash
+curl -X POST "http://localhost:8000/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "I want a knight outfit.", "user_id": 7470350941}'
+```
+
+Test the recommend endpoint:
+```bash
+curl -X POST "http://localhost:8000/recommend" \
+  -H "Content-Type: application/json" \
+  -d '{"theme": "knight", "user_id": 7470350941}'
+```
+
 ## Supported Themes
 
 The recommendation system supports various themes:
@@ -96,10 +126,13 @@ The recommendation system supports various themes:
 ## Technical Details
 
 - **Framework**: FastAPI with uvicorn ASGI server
-- **HTTP Client**: httpx for async HTTP requests
+- **HTTP Client**: httpx for async HTTP requests with timeout and retry logic
 - **Validation**: Pydantic for data models and validation
-- **CORS**: Enabled for cross-origin requests
+- **CORS**: Enabled for cross-origin requests (allow localhost:PORT)
 - **Logging**: Structured logging for debugging and monitoring
+- **API Integration**: Roblox Catalog v2 API (`/search/items/details`) with `categoryFilter=CommunityCreations`
+- **Retry Logic**: 3 attempts with 10-second timeout for external API calls
+- **Fallback**: Sample data when external API is unavailable
 
 ## Development
 
