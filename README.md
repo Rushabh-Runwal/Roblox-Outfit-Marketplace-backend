@@ -1,6 +1,33 @@
 # Roblox-Outfit-Marketplace-backend
 Backend service that powers chat and outfit selection in our Roblox game "Ai-Style-Assistant", using AI agents and the Roblox catalog.
 
+## 🚀 Quick Start
+
+### Running the Server
+
+#### Development Mode (with auto-reload and docs)
+```bash
+# Option 1: Use the convenient script
+./start_dev.sh
+
+# Option 2: Run uvicorn directly
+uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### Production Mode
+```bash
+# Option 1: Use the production script
+./start_prod.sh
+
+# Option 2: Run uvicorn directly
+uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+### 📚 Access Documentation
+- **Interactive API Docs**: http://localhost:8000/docs
+- **Alternative Docs**: http://localhost:8000/redoc
+- **API Info**: http://localhost:8000/
+
 ## Features
 
 - **Chat Endpoint** (`/chat`): NPC chat system that responds to user prompts with style advice

@@ -1,0 +1,13 @@
+# Render deployment configuration
+# Place this in your repo root as render.yaml
+
+services:
+  - type: web
+    name: roblox-outfit-marketplace-backend
+    runtime: python3
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHONPATH
+        value: /opt/render/project/src
+    plan: free

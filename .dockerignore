@@ -1,0 +1,17 @@
+# Dockerignore file to reduce build context size
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+.git
+.gitignore
+README.md
+.env
+.venv
+venv/
+.pytest_cache/
+.coverage
+.DS_Store
+*.log

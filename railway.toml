@@ -1,0 +1,19 @@
+# Railway deployment configuration
+# Place this in your repo root as railway.toml
+
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+startCommand = "uvicorn server.main:app --host 0.0.0.0 --port $PORT"
+
+[[deploy.environmentVariables]]
+name = "PORT"
+value = "8000"
+
+[[deploy.environmentVariables]]
+name = "PYTHONPATH"
+value = "/app"
